@@ -24,6 +24,7 @@ local CONFIG = {
     HARD_TIMEOUT = 600,
     ANIMATION_SPEED = 0.25,
     STRICT_ENVIRONMENT = false,
+    DEBUG = true,
     NOTIFICATION_DURATION = {
         LOADING = 3,
         ERROR = 4,
@@ -1491,6 +1492,12 @@ end
 
 local isProcessing = false
 
+local scriptId = ''
+pcall(function()
+    local clean = string.gsub(gameURL, '%?.*$', '')
+    scriptId = string.match(clean, '([^/]+)$') or ''
+end)
+
 local function validateKey(key)
     if key == '' or key:match('^%s*$') then
         showStatus('Key field is empty', KEYCOLOR.WARNING, 2)
@@ -1520,6 +1527,7 @@ local function validateKey(key)
                 hwid = hwid,
                 nonce = nonce,
                 game_name = gameName,
+                script_id = scriptId,
             }),
         })
     end)
@@ -1589,6 +1597,7 @@ end
 
 local dbgLines = {}
 local function dbg(msg)
+    if not CONFIG.DEBUG then return end
     local line = '[NEOX] ' .. tostring(msg)
     dbgLines[#dbgLines + 1] = line
     pcall(function() warn(line) end)
@@ -1613,6 +1622,7 @@ local function decryptAndRun(auth)
     dbg('STAGE 1 OK: unlock is 32 bytes')
 
     dbg('STAGE 2: building key')
+    dbg('STAGE 2a: script_id sent to server = "' .. tostring(scriptId) .. '"')
     local mask = sha256Bytes(auth.nonce .. '|' .. hwid .. '|' .. auth.key)
     local scriptKey = xorStrings(unlockBytes, mask)
     if #scriptKey ~= 32 then
