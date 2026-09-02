@@ -1,1 +1,1882 @@
-L
+local requestFunc = request
+    or http_request
+    or (http and http.request)
+    or (syn and syn.request)
+if not requestFunc then
+    warn('[NEOX AUTH] Critical Error: HTTP request functionality not available')
+    return
+end
+
+local env = (getgenv and getgenv()) or _G or {}
+
+if env.__NEOX_LOADER_ACTIVE then
+    return
+end
+env.__NEOX_LOADER_ACTIVE = true
+
+local CONFIG = {
+    HUB_NAME = "NEOX HUB",
+    BASE_URL = "https://neoxsoftworks.eu",
+    ICON_ID = "rbxthumb://type=Asset&id=80622869023191&w=150&h=150",
+    GAMELIST_URL = "https://raw.githubusercontent.com/diddybootyjackon123/testingstuff/main/GameList",
+    KEY_FILE = "neoxkey.txt",
+    HTTP_ATTEMPTS = 3,
+    HARD_TIMEOUT = 600,
+    ANIMATION_SPEED = 0.25,
+    STRICT_ENVIRONMENT = false,
+    NOTIFICATION_DURATION = {
+        LOADING = 3,
+        ERROR = 4,
+        SUCCESS = 4
+    }
+}
+
+local band = bit32.band
+local bxor = bit32.bxor
+local bnot = bit32.bnot
+local rshift = bit32.rshift
+local lshift = bit32.lshift
+local rrotate = bit32.rrotate
+
+local strByte = string.byte
+local strChar = string.char
+local strSub = string.sub
+local strRep = string.rep
+local tblConcat = table.concat
+
+local SHA_K = {
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+}
+
+local function sha256Bytes(message)
+    local h0, h1, h2, h3 = 0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a
+    local h4, h5, h6, h7 = 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+
+    local msgLen = #message
+    local bitLen = msgLen * 8
+    local padCount = (55 - msgLen) % 64
+    local padded = message .. '\128' .. strRep('\0', padCount) .. '\0\0\0\0'
+        .. strChar(band(rshift(bitLen, 24), 255), band(rshift(bitLen, 16), 255), band(rshift(bitLen, 8), 255), band(bitLen, 255))
+
+    local w = {}
+    for blockStart = 1, #padded, 64 do
+        for i = 0, 15 do
+            local p = blockStart + i * 4
+            local b1, b2, b3, b4 = strByte(padded, p, p + 3)
+            w[i + 1] = lshift(b1, 24) + lshift(b2, 16) + lshift(b3, 8) + b4
+        end
+        for i = 17, 64 do
+            local v1 = w[i - 15]
+            local v2 = w[i - 2]
+            local s0 = bxor(rrotate(v1, 7), rrotate(v1, 18), rshift(v1, 3))
+            local s1 = bxor(rrotate(v2, 17), rrotate(v2, 19), rshift(v2, 10))
+            w[i] = band(w[i - 16] + s0 + w[i - 7] + s1, 0xFFFFFFFF)
+        end
+
+        local a, b, c, d, e, f, g, h = h0, h1, h2, h3, h4, h5, h6, h7
+        for i = 1, 64 do
+            local S1 = bxor(rrotate(e, 6), rrotate(e, 11), rrotate(e, 25))
+            local ch = bxor(band(e, f), band(bnot(e), g))
+            local t1 = band(h + S1 + ch + SHA_K[i] + w[i], 0xFFFFFFFF)
+            local S0 = bxor(rrotate(a, 2), rrotate(a, 13), rrotate(a, 22))
+            local maj = bxor(band(a, b), band(a, c), band(b, c))
+            local t2 = band(S0 + maj, 0xFFFFFFFF)
+            h = g
+            g = f
+            f = e
+            e = band(d + t1, 0xFFFFFFFF)
+            d = c
+            c = b
+            b = a
+            a = band(t1 + t2, 0xFFFFFFFF)
+        end
+
+        h0 = band(h0 + a, 0xFFFFFFFF)
+        h1 = band(h1 + b, 0xFFFFFFFF)
+        h2 = band(h2 + c, 0xFFFFFFFF)
+        h3 = band(h3 + d, 0xFFFFFFFF)
+        h4 = band(h4 + e, 0xFFFFFFFF)
+        h5 = band(h5 + f, 0xFFFFFFFF)
+        h6 = band(h6 + g, 0xFFFFFFFF)
+        h7 = band(h7 + h, 0xFFFFFFFF)
+    end
+
+    local out = {}
+    local parts = { h0, h1, h2, h3, h4, h5, h6, h7 }
+    for i = 1, 8 do
+        local v = parts[i]
+        out[i] = strChar(band(rshift(v, 24), 255), band(rshift(v, 16), 255), band(rshift(v, 8), 255), band(v, 255))
+    end
+    return tblConcat(out)
+end
+
+local function mul32(a, b)
+    local ah = rshift(a, 16)
+    local al = band(a, 0xFFFF)
+    local bh = rshift(b, 16)
+    local bl = band(b, 0xFFFF)
+    local lo = al * bl
+    local mid = band(al * bh + ah * bl, 0xFFFF)
+    return band(lo + mid * 65536, 0xFFFFFFFF)
+end
+
+local function fnv1aHex(str)
+    local hash = 0x811c9dc5
+    for i = 1, #str do
+        hash = bxor(hash, strByte(str, i))
+        hash = mul32(hash, 0x01000193)
+    end
+    return string.format('%08x', hash)
+end
+
+local B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+local B64_LOOKUP = {}
+for i = 1, #B64_CHARS do
+    B64_LOOKUP[strByte(B64_CHARS, i)] = i - 1
+end
+
+local function base64Decode(data)
+    data = string.gsub(data, '[^A-Za-z0-9%+/=]', '')
+    local out = {}
+    local outIndex = 0
+    local accum = 0
+    local bits = 0
+    for i = 1, #data do
+        local ch = strByte(data, i)
+        if ch == 61 then
+            break
+        end
+        local val = B64_LOOKUP[ch]
+        if val then
+            accum = accum * 64 + val
+            bits = bits + 6
+            if bits >= 8 then
+                bits = bits - 8
+                local byteVal = math.floor(accum / (2 ^ bits))
+                accum = accum - byteVal * (2 ^ bits)
+                outIndex = outIndex + 1
+                out[outIndex] = strChar(byteVal)
+            end
+        end
+        if i % 60000 == 0 then
+            task.wait()
+        end
+    end
+    return tblConcat(out)
+end
+
+local function rc4(data, key, drop)
+    local s = {}
+    for i = 0, 255 do s[i] = i end
+    local keyLen = #key
+    local j = 0
+    for i = 0, 255 do
+        j = band(j + s[i] + strByte(key, (i % keyLen) + 1), 255)
+        s[i], s[j] = s[j], s[i]
+    end
+
+    local a, b = 0, 0
+    for _ = 1, drop do
+        a = band(a + 1, 255)
+        b = band(b + s[a], 255)
+        s[a], s[b] = s[b], s[a]
+    end
+
+    local chunks = {}
+    local chunkIndex = 0
+    local buffer = {}
+    local bufferIndex = 0
+
+    for n = 1, #data do
+        a = band(a + 1, 255)
+        b = band(b + s[a], 255)
+        s[a], s[b] = s[b], s[a]
+        bufferIndex = bufferIndex + 1
+        buffer[bufferIndex] = strChar(bxor(strByte(data, n), s[band(s[a] + s[b], 255)]))
+        if bufferIndex >= 4096 then
+            chunkIndex = chunkIndex + 1
+            chunks[chunkIndex] = tblConcat(buffer)
+            buffer = {}
+            bufferIndex = 0
+            if chunkIndex % 12 == 0 then
+                task.wait()
+            end
+        end
+    end
+    if bufferIndex > 0 then
+        chunkIndex = chunkIndex + 1
+        chunks[chunkIndex] = tblConcat(buffer)
+    end
+    return tblConcat(chunks)
+end
+
+local function hexToBytes(hex)
+    if type(hex) ~= 'string' then return nil end
+    hex = string.gsub(hex, '%s', '')
+    if #hex % 2 ~= 0 then return nil end
+    local out = {}
+    local idx = 0
+    for i = 1, #hex, 2 do
+        local val = tonumber(strSub(hex, i, i + 1), 16)
+        if not val then return nil end
+        idx = idx + 1
+        out[idx] = strChar(val)
+    end
+    return tblConcat(out)
+end
+
+local function xorStrings(a, b)
+    local len = math.min(#a, #b)
+    local out = {}
+    for i = 1, len do
+        out[i] = strChar(bxor(strByte(a, i), strByte(b, i)))
+    end
+    return tblConcat(out)
+end
+
+local function service(name, fallback)
+    local ok, result = pcall(game.GetService, game, name)
+    if ok and result then
+        return result
+    end
+    return fallback
+end
+
+local StarterGui = service("StarterGui")
+local MarketplaceService = service("MarketplaceService")
+local TweenService = service("TweenService")
+local RunService = service("RunService")
+local Players = service("Players")
+local HttpService = service("HttpService")
+local RbxAnalyticsService = service("RbxAnalyticsService")
+local UserInputService = service("UserInputService")
+
+local hwid = nil
+pcall(function()
+    hwid = RbxAnalyticsService:GetClientId()
+end)
+if not hwid or hwid == '' then
+    env.__NEOX_LOADER_ACTIVE = nil
+    warn('[NEOX AUTH] Critical Error: Failed to retrieve hardware identifier')
+    return
+end
+
+local function enumOf(category, item)
+    local ok, value = pcall(function()
+        return Enum[category][item]
+    end)
+    if ok then
+        return value
+    end
+    return nil
+end
+
+local function font(name, fallback)
+    return enumOf("Font", name) or enumOf("Font", fallback) or enumOf("Font", "SourceSans")
+end
+
+local FONT = {
+    Bold = font("GothamBold", "SourceSansBold"),
+    Regular = font("Gotham", "SourceSans"),
+    Medium = font("GothamMedium", "SourceSansSemibold"),
+    Mono = font("Code", "SourceSans")
+}
+
+task.spawn(function()
+    pcall(function()
+        return requestFunc({
+            Url = CONFIG.BASE_URL .. "/api/increment-count",
+            Method = "POST",
+            Timeout = 5
+        })
+    end)
+end)
+
+local COLOR = {
+    Panel = Color3.fromRGB(15, 16, 20),
+    Edge = Color3.fromRGB(35, 38, 46),
+    Rule = Color3.fromRGB(26, 28, 35),
+    Track = Color3.fromRGB(32, 35, 43),
+    Tile = Color3.fromRGB(23, 25, 31),
+    Primary = Color3.fromRGB(238, 241, 246),
+    Secondary = Color3.fromRGB(134, 141, 156),
+    Muted = Color3.fromRGB(64, 69, 81),
+    Neutral = Color3.fromRGB(232, 236, 242),
+    Error = Color3.fromRGB(240, 92, 92),
+    Success = Color3.fromRGB(92, 208, 138)
+}
+
+local KEYCOLOR = {
+    PRIMARY = Color3.fromRGB(121, 56, 234),
+    PRIMARY_HOVER = Color3.fromRGB(141, 76, 254),
+    SECONDARY = Color3.fromRGB(50, 34, 76),
+    SECONDARY_HOVER = Color3.fromRGB(70, 54, 96),
+    BACKGROUND = Color3.fromRGB(26, 17, 47),
+    INPUT_BG = Color3.fromRGB(21, 15, 42),
+    BORDER = Color3.fromRGB(59, 42, 89),
+    SUCCESS = Color3.fromRGB(50, 200, 100),
+    ERROR = Color3.fromRGB(255, 100, 100),
+    WARNING = Color3.fromRGB(255, 150, 50),
+    INFO = Color3.fromRGB(180, 180, 190),
+    TEXT = Color3.fromRGB(255, 255, 255),
+    TEXT_SECONDARY = Color3.fromRGB(123, 101, 188),
+    DISCORD = Color3.fromRGB(140, 116, 213),
+    HEADER_LINE = Color3.fromRGB(27, 42, 53),
+    PREMIUM = Color3.fromRGB(255, 200, 50),
+    PREMIUM_HOVER = Color3.fromRGB(255, 220, 80),
+}
+
+local function new(class, props)
+    local created, inst = pcall(Instance.new, class)
+    if not created or not inst then
+        return nil
+    end
+    local parent = props.Parent
+    props.Parent = nil
+    for key, value in pairs(props) do
+        pcall(function()
+            inst[key] = value
+        end)
+    end
+    if parent then
+        pcall(function()
+            inst.Parent = parent
+        end)
+    end
+    return inst
+end
+
+local function tween(object, info, goal)
+    if not object or not TweenService then
+        return
+    end
+    pcall(function()
+        TweenService:Create(object, info, goal):Play()
+    end)
+end
+
+local function set(object, property, value)
+    if not object then
+        return
+    end
+    pcall(function()
+        object[property] = value
+    end)
+end
+
+local function mount(gui)
+    pcall(function()
+        if syn and syn.protect_gui then
+            syn.protect_gui(gui)
+        elseif protect_gui then
+            protect_gui(gui)
+        end
+    end)
+
+    local targets = {}
+
+    if gethui then
+        table.insert(targets, function()
+            return gethui()
+        end)
+    end
+
+    table.insert(targets, function()
+        return service("CoreGui")
+    end)
+
+    table.insert(targets, function()
+        local player = Players and Players.LocalPlayer
+        return player and player:FindFirstChildOfClass("PlayerGui")
+    end)
+
+    for _, resolve in ipairs(targets) do
+        local ok, container = pcall(resolve)
+        if ok and container then
+            local mounted = pcall(function()
+                gui.Parent = container
+            end)
+            if mounted and gui.Parent then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
+local function httpGet(url)
+    for attempt = 1, CONFIG.HTTP_ATTEMPTS do
+        local ok, body = pcall(function()
+            return game:HttpGet(url, true)
+        end)
+        if ok and type(body) == "string" and #body > 0 then
+            return body
+        end
+
+        local sent, response = pcall(function()
+            return requestFunc({ Url = url, Method = "GET" })
+        end)
+        if sent and type(response) == "table" then
+            local payload = response.Body or response.body
+            if type(payload) == "string" and #payload > 0 then
+                return payload
+            end
+        end
+
+        if attempt < CONFIG.HTTP_ATTEMPTS then
+            task.wait(0.5 * attempt)
+        end
+    end
+    return nil
+end
+
+local compile = loadstring or load
+
+local function runSource(source, chunkName)
+    if type(source) ~= "string" or not compile then
+        return false, "no compiler available"
+    end
+    local compiled, chunk = pcall(compile, source, chunkName)
+    if not compiled then
+        return false, "compile crashed: " .. tostring(chunk)
+    end
+    if type(chunk) ~= "function" then
+        return false, "syntax error: " .. tostring(chunk)
+    end
+    local ran, err = pcall(chunk)
+    if not ran then
+        return false, "runtime error: " .. tostring(err)
+    end
+    return true, nil
+end
+
+local function sendNotification(title, message, duration)
+    if not StarterGui then
+        return
+    end
+    pcall(function()
+        StarterGui:SetCore("SendNotification", {
+            Title = title,
+            Text = message,
+            Duration = duration or 3,
+            Icon = CONFIG.ICON_ID
+        })
+    end)
+end
+
+local function isNativeFunction(fn)
+    if type(fn) ~= 'function' then return false end
+    if iscclosure then
+        local ok, result = pcall(iscclosure, fn)
+        if ok then return result == true end
+    end
+    if is_synapse_function then
+        local ok, result = pcall(is_synapse_function, fn)
+        if ok and result == true then return true end
+    end
+    if debug and debug.info then
+        local ok, src = pcall(debug.info, fn, 's')
+        if ok and type(src) == 'string' then
+            return src == '[C]' or src == ''
+        end
+    end
+    return true
+end
+
+local envFlags = {}
+local envTampered = false
+
+local function checkEnv(name, fn)
+    if fn == nil then return end
+    if not isNativeFunction(fn) then
+        envFlags[name] = 'hooked'
+        envTampered = true
+    end
+end
+
+checkEnv('request', requestFunc)
+checkEnv('loadstring', compile)
+checkEnv('writefile', writefile)
+checkEnv('readfile', readfile)
+checkEnv('isfile', isfile)
+checkEnv('setclipboard', setclipboard)
+checkEnv('httpget', game.HttpGet)
+
+local gameName = "this game"
+local placeId = 0
+pcall(function()
+    placeId = game.PlaceId
+end)
+pcall(function()
+    local info = MarketplaceService:GetProductInfo(placeId)
+    if info and type(info.Name) == "string" and #info.Name > 0 then
+        gameName = info.Name
+    end
+end)
+
+if envTampered then
+    task.spawn(function()
+        pcall(function()
+            requestFunc({
+                Url = CONFIG.BASE_URL .. '/api/report-tamper',
+                Method = 'POST',
+                Headers = { ['Content-Type'] = 'application/json' },
+                Body = HttpService:JSONEncode({
+                    hwid = hwid,
+                    game_name = gameName,
+                    flags = envFlags,
+                }),
+            })
+        end)
+    end)
+end
+
+local Loader = new("ScreenGui", {
+    Name = "NX_" .. tostring(math.random(100000, 999999)),
+    IgnoreGuiInset = true,
+    ScreenInsets = enumOf("ScreenInsets", "DeviceSafeInsets"),
+    ResetOnSpawn = false,
+    ZIndexBehavior = enumOf("ZIndexBehavior", "Sibling"),
+    DisplayOrder = 999999
+})
+
+if not Loader then
+    env.__NEOX_LOADER_ACTIVE = nil
+    warn("[NEOX] Unable to create interface")
+    return
+end
+
+if not mount(Loader) then
+    pcall(function()
+        Loader:Destroy()
+    end)
+    env.__NEOX_LOADER_ACTIVE = nil
+    warn("[NEOX] Unable to mount interface")
+    return
+end
+
+local Panel = new("Frame", {
+    Name = "Panel",
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    BackgroundColor3 = COLOR.Panel,
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    ClipsDescendants = true,
+    Position = UDim2.new(0.5, 0, 0.5, 14),
+    Size = UDim2.new(0, 460, 0, 190),
+    Parent = Loader
+})
+
+local Scale = new("UIScale", { Scale = 1, Parent = Panel })
+
+new("UICorner", { CornerRadius = UDim.new(0, 14), Parent = Panel })
+
+local PanelEdge = new("UIStroke", {
+    Color = COLOR.Edge,
+    Thickness = 1,
+    Transparency = 1,
+    ApplyStrokeMode = enumOf("ApplyStrokeMode", "Border"),
+    Parent = Panel
+})
+
+local Texture = new("ImageLabel", {
+    Name = "Texture",
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    Image = "http://www.roblox.com/asset/?id=91961368561481",
+    ImageColor3 = Color3.fromRGB(255, 255, 255),
+    ImageTransparency = 1,
+    Size = UDim2.new(1, 0, 1, 0),
+    ZIndex = 1,
+    Parent = Panel
+})
+
+local Tile = new("ImageLabel", {
+    Name = "Tile",
+    BackgroundColor3 = COLOR.Tile,
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    Image = CONFIG.ICON_ID,
+    ImageTransparency = 1,
+    Position = UDim2.new(0, 26, 0, 24),
+    Size = UDim2.new(0, 40, 0, 40),
+    ZIndex = 3,
+    Parent = Panel
+})
+
+new("UICorner", { CornerRadius = UDim.new(0, 10), Parent = Tile })
+
+local TileEdge = new("UIStroke", {
+    Color = COLOR.Edge,
+    Thickness = 1,
+    Transparency = 1,
+    Parent = Tile
+})
+
+local Title = new("TextLabel", {
+    Name = "Title",
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    Font = FONT.Bold,
+    Text = "NEOX HUB",
+    TextColor3 = COLOR.Primary,
+    TextSize = 17,
+    TextTransparency = 1,
+    TextXAlignment = enumOf("TextXAlignment", "Left"),
+    Position = UDim2.new(0, 78, 0, 25),
+    Size = UDim2.new(0, 260, 0, 18),
+    ZIndex = 3,
+    Parent = Panel
+})
+
+local Tagline = new("TextLabel", {
+    Name = "Tagline",
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    Font = FONT.Regular,
+    Text = "Shaping the future of scripting",
+    TextColor3 = COLOR.Secondary,
+    TextSize = 11,
+    TextTransparency = 1,
+    TextXAlignment = enumOf("TextXAlignment", "Left"),
+    Position = UDim2.new(0, 78, 0, 45),
+    Size = UDim2.new(0, 300, 0, 16),
+    ZIndex = 3,
+    Parent = Panel
+})
+
+local Rule = new("Frame", {
+    Name = "Rule",
+    BackgroundColor3 = COLOR.Rule,
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    Position = UDim2.new(0, 0, 0, 88),
+    Size = UDim2.new(1, 0, 0, 1),
+    ZIndex = 3,
+    Parent = Panel
+})
+
+local Dot = new("Frame", {
+    Name = "Dot",
+    BackgroundColor3 = COLOR.Neutral,
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    Position = UDim2.new(0, 26, 0, 114),
+    Size = UDim2.new(0, 5, 0, 5),
+    ZIndex = 3,
+    Parent = Panel
+})
+
+new("UICorner", { CornerRadius = UDim.new(1, 0), Parent = Dot })
+
+local Status = new("TextLabel", {
+    Name = "Status",
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    Font = FONT.Regular,
+    Text = "Initializing",
+    TextColor3 = COLOR.Secondary,
+    TextSize = 12,
+    TextTransparency = 1,
+    TextTruncate = enumOf("TextTruncate", "AtEnd"),
+    TextXAlignment = enumOf("TextXAlignment", "Left"),
+    Position = UDim2.new(0, 40, 0, 107),
+    Size = UDim2.new(1, -120, 0, 18),
+    ZIndex = 3,
+    Parent = Panel
+})
+
+local Percent = new("TextLabel", {
+    Name = "Percent",
+    AnchorPoint = Vector2.new(1, 0),
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    Font = FONT.Mono,
+    Text = "00",
+    TextColor3 = COLOR.Primary,
+    TextSize = 12,
+    TextTransparency = 1,
+    TextXAlignment = enumOf("TextXAlignment", "Right"),
+    Position = UDim2.new(1, -26, 0, 107),
+    Size = UDim2.new(0, 60, 0, 18),
+    ZIndex = 3,
+    Parent = Panel
+})
+
+local Track = new("Frame", {
+    Name = "Track",
+    BackgroundColor3 = COLOR.Track,
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    ClipsDescendants = true,
+    Position = UDim2.new(0, 26, 0, 138),
+    Size = UDim2.new(1, -52, 0, 2),
+    ZIndex = 3,
+    Parent = Panel
+})
+
+new("UICorner", { CornerRadius = UDim.new(1, 0), Parent = Track })
+
+local Fill = new("Frame", {
+    Name = "Fill",
+    BackgroundColor3 = COLOR.Neutral,
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    Size = UDim2.new(0, 0, 1, 0),
+    ZIndex = 4,
+    Parent = Track
+})
+
+new("UICorner", { CornerRadius = UDim.new(1, 0), Parent = Fill })
+
+local Sweep = new("UIGradient", {
+    Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.35),
+        NumberSequenceKeypoint.new(0.45, 0),
+        NumberSequenceKeypoint.new(0.55, 0),
+        NumberSequenceKeypoint.new(1, 0.35)
+    }),
+    Offset = Vector2.new(-1, 0),
+    Parent = Fill
+})
+
+local Footer = new("TextLabel", {
+    Name = "Footer",
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    Font = FONT.Medium,
+    Text = "N E O X   S O F T W O R K S",
+    TextColor3 = COLOR.Muted,
+    TextSize = 9,
+    TextTransparency = 1,
+    TextXAlignment = enumOf("TextXAlignment", "Center"),
+    Position = UDim2.new(0, 26, 0, 156),
+    Size = UDim2.new(1, -52, 0, 12),
+    ZIndex = 3,
+    Parent = Panel
+})
+
+local REVEAL = {}
+
+local function register(object, property, shown, order)
+    if object then
+        table.insert(REVEAL, { Object = object, Property = property, Shown = shown, Order = order })
+    end
+end
+
+register(Panel, "BackgroundTransparency", 0, 0)
+register(PanelEdge, "Transparency", 0, 0)
+register(Texture, "ImageTransparency", 0.95, 0)
+register(Tile, "BackgroundTransparency", 0, 1)
+register(Tile, "ImageTransparency", 0, 1)
+register(TileEdge, "Transparency", 0, 1)
+register(Title, "TextTransparency", 0, 2)
+register(Tagline, "TextTransparency", 0, 3)
+register(Rule, "BackgroundTransparency", 0, 3)
+register(Dot, "BackgroundTransparency", 0, 4)
+register(Status, "TextTransparency", 0, 4)
+register(Percent, "TextTransparency", 0, 4)
+register(Track, "BackgroundTransparency", 0, 5)
+register(Fill, "BackgroundTransparency", 0, 5)
+register(Footer, "TextTransparency", 0, 6)
+
+local dismissed = false
+local destroyed = false
+local displayed = 0
+local target = 0
+local connections = {}
+
+local function fit()
+    if not Scale then
+        return
+    end
+    local camera = workspace and workspace.CurrentCamera
+    local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+    if viewport.X <= 0 or viewport.Y <= 0 then
+        return
+    end
+    local ratio = math.min(viewport.X / 520, viewport.Y / 300)
+    Scale.Scale = math.clamp(ratio, 0.5, 1)
+end
+
+pcall(fit)
+
+pcall(function()
+    local camera = workspace.CurrentCamera
+    if camera then
+        table.insert(connections, camera:GetPropertyChangedSignal("ViewportSize"):Connect(fit))
+    end
+    table.insert(connections, workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+        pcall(fit)
+    end))
+end)
+
+local keyGui = nil
+
+local function cleanup()
+    if destroyed then
+        return
+    end
+    destroyed = true
+    dismissed = true
+    for _, connection in ipairs(connections) do
+        pcall(function()
+            connection:Disconnect()
+        end)
+    end
+    pcall(function()
+        Loader:Destroy()
+    end)
+    if keyGui then
+        pcall(function()
+            keyGui:Destroy()
+        end)
+    end
+    env.__NEOX_LOADER_ACTIVE = nil
+end
+
+task.delay(CONFIG.HARD_TIMEOUT, cleanup)
+
+local function reveal(shown)
+    for _, entry in ipairs(REVEAL) do
+        local goal = {}
+        goal[entry.Property] = shown and entry.Shown or 1
+        local info = TweenInfo.new(
+            shown and 0.4 or 0.28,
+            Enum.EasingStyle.Quart,
+            Enum.EasingDirection.Out,
+            0,
+            false,
+            shown and entry.Order * 0.045 or 0
+        )
+        tween(entry.Object, info, goal)
+    end
+end
+
+local function setTone(color)
+    tween(Fill, TweenInfo.new(0.3), { BackgroundColor3 = color })
+    tween(Dot, TweenInfo.new(0.3), { BackgroundColor3 = color })
+end
+
+local function setStatus(text)
+    if dismissed or not Status or Status.Text == text then
+        return
+    end
+    tween(Status, TweenInfo.new(0.12), { TextTransparency = 1 })
+    task.delay(0.13, function()
+        if dismissed then
+            return
+        end
+        set(Status, "Text", text)
+        tween(Status, TweenInfo.new(0.2), { TextTransparency = 0 })
+    end)
+end
+
+local function setProgress(value)
+    target = math.clamp(value, 0, 100)
+end
+
+task.spawn(function()
+    while not dismissed and Sweep and Sweep.Parent do
+        set(Sweep, "Offset", Vector2.new(-1, 0))
+        tween(
+            Sweep,
+            TweenInfo.new(1.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+            { Offset = Vector2.new(1, 0) }
+        )
+        task.wait(2.4)
+    end
+end)
+
+local stepSignal = RunService and (RunService.RenderStepped or RunService.Heartbeat)
+local counter
+
+if stepSignal then
+    local ok, connection = pcall(function()
+        return stepSignal:Connect(function(delta)
+            if destroyed then
+                return
+            end
+            displayed = displayed + (target - displayed) * math.min((delta or 0.016) * 7, 1)
+            if math.abs(target - displayed) < 0.15 then
+                displayed = target
+            end
+            set(Fill, "Size", UDim2.new(displayed / 100, 0, 1, 0))
+            set(Percent, "Text", string.format("%02d", math.floor(displayed + 0.5)))
+        end)
+    end)
+    if ok and connection then
+        counter = connection
+        table.insert(connections, connection)
+    end
+end
+
+if not counter then
+    task.spawn(function()
+        while not destroyed do
+            displayed = displayed + (target - displayed) * 0.2
+            if math.abs(target - displayed) < 0.15 then
+                displayed = target
+            end
+            set(Fill, "Size", UDim2.new(displayed / 100, 0, 1, 0))
+            set(Percent, "Text", string.format("%02d", math.floor(displayed + 0.5)))
+            task.wait(0.03)
+        end
+    end)
+end
+
+local function showLoader()
+    reveal(true)
+    tween(
+        Panel,
+        TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+        { Position = UDim2.new(0.5, 0, 0.5, 0) }
+    )
+    task.wait(0.45)
+end
+
+local function hideLoader()
+    if dismissed then
+        return
+    end
+    dismissed = true
+    reveal(false)
+    tween(
+        Panel,
+        TweenInfo.new(0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
+        { Position = UDim2.new(0.5, 0, 0.5, 10) }
+    )
+    task.wait(0.45)
+    pcall(function()
+        Loader:Destroy()
+    end)
+end
+
+local function failLoader(message)
+    setTone(COLOR.Error)
+    setStatus(message)
+    setProgress(100)
+    task.wait(2)
+    hideLoader()
+    cleanup()
+    sendNotification(CONFIG.HUB_NAME .. " - ERROR", message, CONFIG.NOTIFICATION_DURATION.ERROR)
+end
+
+pcall(showLoader)
+
+setStatus("Initializing NEOX HUB")
+setProgress(10)
+
+local gameList = httpGet(CONFIG.GAMELIST_URL)
+if not gameList then
+    failLoader("Unable to reach the server")
+    return
+end
+
+setStatus("Loading game database")
+setProgress(32)
+
+local listOk = runSource(gameList, "=NEOXGAMELIST")
+if not listOk then
+    failLoader("Game database failed to load")
+    return
+end
+
+setStatus("Verifying compatibility")
+setProgress(54)
+
+local registry = (getgenv and getgenv().Games) or env.Games or _G.Games
+local gameURL = type(registry) == "table" and registry[placeId] or nil
+
+if type(gameURL) ~= "string" or #gameURL == 0 then
+    setTone(COLOR.Error)
+    setStatus("Unsupported game: " .. gameName)
+    setProgress(100)
+    task.wait(2.2)
+    setStatus("Request this game on our Discord")
+    task.wait(2.8)
+    hideLoader()
+    cleanup()
+    sendNotification(
+        CONFIG.HUB_NAME .. " - INFO",
+        "You Can Request Script For This Game On Our Discord Server",
+        CONFIG.NOTIFICATION_DURATION.ERROR
+    )
+    return
+end
+
+setStatus(gameName)
+setProgress(70)
+task.wait(0.7)
+
+setStatus("Waiting for authentication")
+setProgress(75)
+task.wait(0.4)
+hideLoader()
+
+keyGui = new("ScreenGui", {
+    Name = "NXK_" .. tostring(math.random(100000, 999999)),
+    IgnoreGuiInset = true,
+    ResetOnSpawn = false,
+    ZIndexBehavior = enumOf("ZIndexBehavior", "Sibling"),
+    DisplayOrder = 999999
+})
+
+if not keyGui or not mount(keyGui) then
+    cleanup()
+    warn("[NEOX] Unable to mount authentication interface")
+    return
+end
+
+local function createTween(instance, props)
+    local tweenInfo = TweenInfo.new(
+        CONFIG.ANIMATION_SPEED,
+        Enum.EasingStyle.Quad,
+        Enum.EasingDirection.Out
+    )
+    return TweenService:Create(instance, tweenInfo, props)
+end
+
+local mainFrame = Instance.new('Frame')
+mainFrame.Name = 'MainFrame'
+mainFrame.Size = UDim2.new(0, 370, 0, 235)
+mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+mainFrame.BackgroundColor3 = KEYCOLOR.BACKGROUND
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.ClipsDescendants = true
+mainFrame.Parent = keyGui
+
+local frameCorner = Instance.new('UICorner')
+frameCorner.CornerRadius = UDim.new(0, 10)
+frameCorner.Parent = mainFrame
+
+local gradientOverlay = Instance.new('Frame')
+gradientOverlay.Name = 'GradientOverlay'
+gradientOverlay.Size = UDim2.new(1, 0, 1, 0)
+gradientOverlay.BackgroundTransparency = 0.95
+gradientOverlay.BorderSizePixel = 0
+gradientOverlay.ZIndex = 0
+gradientOverlay.Parent = mainFrame
+
+local gradient = Instance.new('UIGradient')
+gradient.Rotation = 45
+gradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(121, 56, 234)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(50, 34, 76)),
+})
+gradient.Parent = gradientOverlay
+
+local gradientCorner = Instance.new('UICorner')
+gradientCorner.CornerRadius = UDim.new(0, 10)
+gradientCorner.Parent = gradientOverlay
+
+task.spawn(function()
+    while gradientOverlay.Parent do
+        createTween(gradient, { Rotation = gradient.Rotation + 360 }):Play()
+        task.wait(10)
+    end
+end)
+
+local header = Instance.new('Frame')
+header.Name = 'Header'
+header.Size = UDim2.new(1, 0, 0, 35)
+header.BackgroundTransparency = 1
+header.BorderSizePixel = 0
+header.ZIndex = 2
+header.Parent = mainFrame
+
+local headerLine = Instance.new('Frame')
+headerLine.Name = 'Separator'
+headerLine.Size = UDim2.new(1, 0, 0, 1)
+headerLine.Position = UDim2.new(0, 0, 1, 0)
+headerLine.BackgroundColor3 = KEYCOLOR.HEADER_LINE
+headerLine.BorderSizePixel = 0
+headerLine.Parent = header
+
+local keyTitle = Instance.new('TextLabel')
+keyTitle.Name = 'Title'
+keyTitle.Size = UDim2.new(0, 100, 1, 0)
+keyTitle.Position = UDim2.new(0, 15, 0, 0)
+keyTitle.BackgroundTransparency = 1
+keyTitle.Text = 'NEOX HUB'
+keyTitle.TextColor3 = KEYCOLOR.TEXT
+keyTitle.TextSize = 18
+keyTitle.Font = FONT.Bold
+keyTitle.TextXAlignment = Enum.TextXAlignment.Left
+keyTitle.Parent = header
+
+local discordButton = Instance.new('TextButton')
+discordButton.Name = 'DiscordButton'
+discordButton.Size = UDim2.new(0, 50, 0, 20)
+discordButton.Position = UDim2.new(1, -60, 0.5, 0)
+discordButton.AnchorPoint = Vector2.new(1, 0.5)
+discordButton.BackgroundTransparency = 1
+discordButton.Text = 'Discord'
+discordButton.TextSize = 13
+discordButton.TextColor3 = KEYCOLOR.DISCORD
+discordButton.Font = FONT.Bold
+discordButton.AutoButtonColor = false
+discordButton.Parent = header
+
+local discordIcon = Instance.new('ImageLabel')
+discordIcon.Name = 'Icon'
+discordIcon.Size = UDim2.new(0, 14, 0, 14)
+discordIcon.Position = UDim2.new(1, 2, 0.5, 0)
+discordIcon.AnchorPoint = Vector2.new(0, 0.5)
+discordIcon.BackgroundTransparency = 1
+discordIcon.Image = 'rbxassetid://10734943193'
+discordIcon.ImageColor3 = KEYCOLOR.DISCORD
+discordIcon.Parent = discordButton
+
+local closeButton = Instance.new('TextButton')
+closeButton.Name = 'CloseButton'
+closeButton.Size = UDim2.new(0, 25, 0, 25)
+closeButton.Position = UDim2.new(1, -7, 0.5, 0)
+closeButton.AnchorPoint = Vector2.new(1, 0.5)
+closeButton.BackgroundTransparency = 1
+closeButton.Text = 'X'
+closeButton.TextSize = 18
+closeButton.TextColor3 = KEYCOLOR.TEXT
+closeButton.Font = FONT.Bold
+closeButton.AutoButtonColor = false
+closeButton.Parent = header
+
+local tutorialText = Instance.new('TextLabel')
+tutorialText.Name = 'TutorialText'
+tutorialText.Size = UDim2.new(0.9, 0, 0, 40)
+tutorialText.Position = UDim2.new(0.5, 0, 0, 45)
+tutorialText.AnchorPoint = Vector2.new(0.5, 0)
+tutorialText.BackgroundTransparency = 1
+tutorialText.Text =
+    "Get a new key by clicking 'Get Key' It Only Takes (10 Sec) To Generate Key. Press Enter or click Verify to authenticate. Join Discord for support."
+tutorialText.TextColor3 = KEYCOLOR.TEXT_SECONDARY
+tutorialText.TextSize = 12
+tutorialText.Font = FONT.Regular
+tutorialText.TextWrapped = true
+tutorialText.TextXAlignment = Enum.TextXAlignment.Left
+tutorialText.ZIndex = 2
+tutorialText.Parent = mainFrame
+
+local keyInputFrame = Instance.new('Frame')
+keyInputFrame.Name = 'KeyInputContainer'
+keyInputFrame.Size = UDim2.new(0.9, 0, 0, 35)
+keyInputFrame.Position = UDim2.new(0.5, 0, 0, 95)
+keyInputFrame.AnchorPoint = Vector2.new(0.5, 0)
+keyInputFrame.BackgroundColor3 = KEYCOLOR.INPUT_BG
+keyInputFrame.BorderSizePixel = 0
+keyInputFrame.ZIndex = 2
+keyInputFrame.Parent = mainFrame
+
+local inputStroke = Instance.new('UIStroke')
+inputStroke.Thickness = 1
+inputStroke.Color = KEYCOLOR.BORDER
+inputStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+inputStroke.Parent = keyInputFrame
+
+local inputCorner = Instance.new('UICorner')
+inputCorner.CornerRadius = UDim.new(0, 6)
+inputCorner.Parent = keyInputFrame
+
+local inputGlow = Instance.new('UIStroke')
+inputGlow.Thickness = 0
+inputGlow.Color = KEYCOLOR.PRIMARY
+inputGlow.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+inputGlow.Transparency = 1
+inputGlow.Parent = keyInputFrame
+
+local keyInput = Instance.new('TextBox')
+keyInput.Name = 'KeyInput'
+keyInput.Size = UDim2.new(1, -20, 1, 0)
+keyInput.Position = UDim2.new(0, 10, 0, 0)
+keyInput.BackgroundTransparency = 1
+keyInput.PlaceholderText = 'Enter Your Key (Press Enter to Verify)'
+keyInput.PlaceholderColor3 = Color3.fromRGB(100, 100, 110)
+keyInput.Text = ''
+keyInput.TextSize = 14
+keyInput.TextColor3 = KEYCOLOR.TEXT
+keyInput.Font = FONT.Regular
+keyInput.ClearTextOnFocus = false
+keyInput.TextXAlignment = Enum.TextXAlignment.Left
+keyInput.ZIndex = 3
+keyInput.Parent = keyInputFrame
+
+keyInput.Focused:Connect(function()
+    createTween(inputGlow, { Thickness = 2, Transparency = 0.5 }):Play()
+    createTween(inputStroke, { Transparency = 0.3 }):Play()
+end)
+
+keyInput.FocusLost:Connect(function()
+    createTween(inputGlow, { Thickness = 0, Transparency = 1 }):Play()
+    createTween(inputStroke, { Transparency = 0 }):Play()
+end)
+
+local statusLabel = Instance.new('TextLabel')
+statusLabel.Name = 'StatusLabel'
+statusLabel.Size = UDim2.new(0.9, 0, 0, 40)
+statusLabel.Position = UDim2.new(0.5, 0, 0.55, 0)
+statusLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = ''
+statusLabel.TextColor3 = KEYCOLOR.INFO
+statusLabel.TextSize = 13
+statusLabel.Font = FONT.Medium
+statusLabel.TextWrapped = true
+statusLabel.ZIndex = 2
+statusLabel.Parent = mainFrame
+
+local helpLabel = Instance.new('TextLabel')
+helpLabel.Name = 'HelpLabel'
+helpLabel.Size = UDim2.new(0.9, 0, 0, 30)
+helpLabel.Position = UDim2.new(0.5, 0, 0.7, 0)
+helpLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+helpLabel.BackgroundTransparency = 1
+helpLabel.Text = ''
+helpLabel.TextColor3 = KEYCOLOR.TEXT_SECONDARY
+helpLabel.TextSize = 11
+helpLabel.Font = FONT.Regular
+helpLabel.TextWrapped = true
+helpLabel.ZIndex = 2
+helpLabel.Visible = false
+helpLabel.Parent = mainFrame
+
+local loadingDots = Instance.new('TextLabel')
+loadingDots.Name = 'LoadingDots'
+loadingDots.Size = UDim2.new(0, 30, 0, 20)
+loadingDots.Position = UDim2.new(0.5, 0, 0.65, 0)
+loadingDots.AnchorPoint = Vector2.new(0.5, 0.5)
+loadingDots.BackgroundTransparency = 1
+loadingDots.Text = ''
+loadingDots.TextColor3 = KEYCOLOR.PRIMARY
+loadingDots.TextSize = 20
+loadingDots.Font = FONT.Bold
+loadingDots.ZIndex = 2
+loadingDots.Visible = false
+loadingDots.Parent = mainFrame
+
+local buttonFrame = Instance.new('Frame')
+buttonFrame.Name = 'ButtonContainer'
+buttonFrame.Size = UDim2.new(0.9, 0, 0, 30)
+buttonFrame.Position = UDim2.new(0.5, 0, 1, -50)
+buttonFrame.AnchorPoint = Vector2.new(0.5, 1)
+buttonFrame.BackgroundTransparency = 1
+buttonFrame.ZIndex = 2
+buttonFrame.Parent = mainFrame
+
+local getKeyButton = Instance.new('TextButton')
+getKeyButton.Name = 'GetKeyButton'
+getKeyButton.Size = UDim2.new(0.48, 0, 1, 0)
+getKeyButton.Position = UDim2.new(0, 0, 0, 0)
+getKeyButton.BackgroundColor3 = KEYCOLOR.PRIMARY
+getKeyButton.Text = 'Get Key'
+getKeyButton.TextSize = 13
+getKeyButton.TextColor3 = KEYCOLOR.TEXT
+getKeyButton.Font = FONT.Bold
+getKeyButton.AutoButtonColor = false
+getKeyButton.ZIndex = 3
+getKeyButton.Parent = buttonFrame
+
+local getKeyCorner = Instance.new('UICorner')
+getKeyCorner.CornerRadius = UDim.new(0, 7)
+getKeyCorner.Parent = getKeyButton
+
+local verifyButton = Instance.new('TextButton')
+verifyButton.Name = 'VerifyButton'
+verifyButton.Size = UDim2.new(0.48, 0, 1, 0)
+verifyButton.Position = UDim2.new(1, 0, 0, 0)
+verifyButton.AnchorPoint = Vector2.new(1, 0)
+verifyButton.BackgroundColor3 = KEYCOLOR.SECONDARY
+verifyButton.Text = 'Verify'
+verifyButton.TextSize = 13
+verifyButton.TextColor3 = KEYCOLOR.TEXT
+verifyButton.Font = FONT.Bold
+verifyButton.AutoButtonColor = false
+verifyButton.ZIndex = 3
+verifyButton.Parent = buttonFrame
+
+local verifyCorner = Instance.new('UICorner')
+verifyCorner.CornerRadius = UDim.new(0, 7)
+verifyCorner.Parent = verifyButton
+
+local premiumRow = Instance.new('Frame')
+premiumRow.Name = 'PremiumRow'
+premiumRow.Size = UDim2.new(0.9, 0, 0, 26)
+premiumRow.Position = UDim2.new(0.5, 0, 1, -15)
+premiumRow.AnchorPoint = Vector2.new(0.5, 1)
+premiumRow.BackgroundColor3 = Color3.fromRGB(30, 20, 55)
+premiumRow.BorderSizePixel = 0
+premiumRow.ZIndex = 2
+premiumRow.Parent = mainFrame
+
+local premiumRowCorner = Instance.new('UICorner')
+premiumRowCorner.CornerRadius = UDim.new(0, 7)
+premiumRowCorner.Parent = premiumRow
+
+local premiumRowStroke = Instance.new('UIStroke')
+premiumRowStroke.Thickness = 1
+premiumRowStroke.Color = KEYCOLOR.PREMIUM
+premiumRowStroke.Transparency = 0.55
+premiumRowStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+premiumRowStroke.Parent = premiumRow
+
+task.spawn(function()
+    while premiumRow.Parent do
+        createTween(premiumRowStroke, { Transparency = 0.1 }):Play()
+        task.wait(1)
+        createTween(premiumRowStroke, { Transparency = 0.6 }):Play()
+        task.wait(1)
+    end
+end)
+
+local premiumLabel = Instance.new('TextLabel')
+premiumLabel.Name = 'PremiumLabel'
+premiumLabel.Size = UDim2.new(1, -80, 1, 0)
+premiumLabel.Position = UDim2.new(0, 10, 0, 0)
+premiumLabel.BackgroundTransparency = 1
+premiumLabel.Text = 'Tired of key system? Buy Premium'
+premiumLabel.TextColor3 = KEYCOLOR.PREMIUM
+premiumLabel.TextSize = 12
+premiumLabel.Font = FONT.Medium
+premiumLabel.TextXAlignment = Enum.TextXAlignment.Left
+premiumLabel.TextYAlignment = Enum.TextYAlignment.Center
+premiumLabel.ZIndex = 3
+premiumLabel.Parent = premiumRow
+
+local buyButton = Instance.new('TextButton')
+buyButton.Name = 'BuyButton'
+buyButton.Size = UDim2.new(0, 70, 1, -6)
+buyButton.Position = UDim2.new(1, -3, 0.5, 0)
+buyButton.AnchorPoint = Vector2.new(1, 0.5)
+buyButton.BackgroundColor3 = KEYCOLOR.PREMIUM
+buyButton.Text = 'Buy Now'
+buyButton.TextSize = 12
+buyButton.TextColor3 = Color3.fromRGB(20, 10, 40)
+buyButton.Font = FONT.Bold
+buyButton.AutoButtonColor = false
+buyButton.ZIndex = 4
+buyButton.Parent = premiumRow
+
+local buyButtonCorner = Instance.new('UICorner')
+buyButtonCorner.CornerRadius = UDim.new(0, 5)
+buyButtonCorner.Parent = buyButton
+
+local function setupButtonHover(button, normalColor, hoverColor)
+    button.MouseEnter:Connect(function()
+        createTween(button, { BackgroundColor3 = hoverColor }):Play()
+    end)
+    button.MouseLeave:Connect(function()
+        createTween(button, { BackgroundColor3 = normalColor }):Play()
+    end)
+end
+
+setupButtonHover(getKeyButton, KEYCOLOR.PRIMARY, KEYCOLOR.PRIMARY_HOVER)
+setupButtonHover(verifyButton, KEYCOLOR.SECONDARY, KEYCOLOR.SECONDARY_HOVER)
+setupButtonHover(buyButton, KEYCOLOR.PREMIUM, KEYCOLOR.PREMIUM_HOVER)
+
+closeButton.MouseEnter:Connect(function()
+    createTween(closeButton, { TextColor3 = KEYCOLOR.ERROR, Rotation = 90 }):Play()
+end)
+closeButton.MouseLeave:Connect(function()
+    createTween(closeButton, { TextColor3 = KEYCOLOR.TEXT, Rotation = 0 }):Play()
+end)
+
+discordButton.MouseEnter:Connect(function()
+    createTween(discordButton, { TextColor3 = Color3.fromRGB(160, 136, 233) }):Play()
+    createTween(discordIcon, { ImageColor3 = Color3.fromRGB(160, 136, 233) }):Play()
+end)
+discordButton.MouseLeave:Connect(function()
+    createTween(discordButton, { TextColor3 = KEYCOLOR.DISCORD }):Play()
+    createTween(discordIcon, { ImageColor3 = KEYCOLOR.DISCORD }):Play()
+end)
+
+local currentStatusThread = nil
+
+local function setInputVisible(visible)
+    keyInput.Visible = visible
+    tutorialText.Visible = visible
+    buttonFrame.Visible = visible
+    keyInputFrame.Visible = visible
+    premiumRow.Visible = visible
+end
+
+local function showStatus(text, color, duration, showLoading, helpText)
+    if currentStatusThread then
+        pcall(task.cancel, currentStatusThread)
+        currentStatusThread = nil
+    end
+
+    statusLabel.Text = text
+    statusLabel.TextColor3 = color or KEYCOLOR.INFO
+    loadingDots.Visible = showLoading or false
+
+    if helpText then
+        helpLabel.Text = helpText
+        helpLabel.Visible = true
+    else
+        helpLabel.Visible = false
+    end
+
+    if showLoading then
+        task.spawn(function()
+            local dots = 0
+            while loadingDots.Visible do
+                dots = (dots % 3) + 1
+                loadingDots.Text = strRep('.', dots)
+                task.wait(0.5)
+            end
+        end)
+    end
+
+    if duration then
+        currentStatusThread = task.spawn(function()
+            task.wait(duration)
+            statusLabel.Text = ''
+            loadingDots.Visible = false
+            helpLabel.Visible = false
+        end)
+    end
+end
+
+local function saveKey(key)
+    return (pcall(function()
+        if writefile then
+            writefile(CONFIG.KEY_FILE, key)
+        end
+    end))
+end
+
+local function loadSavedKey()
+    local success, key = pcall(function()
+        if readfile and isfile and isfile(CONFIG.KEY_FILE) then
+            return readfile(CONFIG.KEY_FILE)
+        end
+        return nil
+    end)
+    return success and key or nil
+end
+
+local function getNonce()
+    local success, response = pcall(function()
+        return requestFunc({
+            Url = CONFIG.BASE_URL .. '/api/get-nonce',
+            Method = 'GET',
+            Headers = { ['Content-Type'] = 'application/json' },
+        })
+    end)
+
+    if not success or not response or not response.Body then
+        return nil, 'Failed to retrieve security handshake (ERR-HS02)'
+    end
+
+    local decodeSuccess, body = pcall(function()
+        return HttpService:JSONDecode(response.Body)
+    end)
+
+    if not decodeSuccess or not body or not body.nonce then
+        return nil, 'Invalid server handshake response (ERR-HS03)'
+    end
+
+    return body.nonce, nil
+end
+
+local isProcessing = false
+
+local function validateKey(key)
+    if key == '' or key:match('^%s*$') then
+        showStatus('Key field is empty', KEYCOLOR.WARNING, 2)
+        return nil
+    end
+
+    showStatus('Fetching security handshake...', KEYCOLOR.INFO, nil, true)
+    task.wait(0.5)
+
+    local nonce, nonceError = getNonce()
+    if not nonce then
+        showStatus(nonceError or 'Failed to initiate security handshake (ERR-HS01)', KEYCOLOR.ERROR, 3, false,
+            "Help: Check your internet connection, disable VPN if using one, and try again.")
+        return nil
+    end
+
+    showStatus('Connecting to server...', KEYCOLOR.INFO, nil, true)
+    task.wait(0.5)
+
+    local success, response = pcall(function()
+        return requestFunc({
+            Url = CONFIG.BASE_URL .. '/api/validate-key',
+            Method = 'POST',
+            Headers = { ['Content-Type'] = 'application/json' },
+            Body = HttpService:JSONEncode({
+                key = key,
+                hwid = hwid,
+                nonce = nonce,
+                game_name = gameName,
+            }),
+        })
+    end)
+
+    if not success then
+        showStatus('Connection failed - Network error', KEYCOLOR.ERROR, 3, false,
+            "Help: Your executor might be struggling to send the request. Check internet connection and try again.")
+        return nil
+    end
+
+    if not response then
+        showStatus('No response from server', KEYCOLOR.ERROR, 3, false,
+            "Help: Server might be down or your internet is slow. Try again later.")
+        return nil
+    end
+
+    showStatus('Processing server response...', KEYCOLOR.INFO, nil, true)
+    task.wait(0.3)
+
+    if not response.Body then
+        showStatus('Server returned empty response', KEYCOLOR.ERROR, 3, false,
+            "Help: Your executor might be struggling to receive data. Check internet stability.")
+        return nil
+    end
+
+    local decodeSuccess, body = pcall(function()
+        return HttpService:JSONDecode(response.Body)
+    end)
+
+    if not decodeSuccess or type(body) ~= 'table' then
+        showStatus('Failed to decode server response', KEYCOLOR.ERROR, 3, false,
+            "Help: Internet problem or server issue. Try again with better connection.")
+        return nil
+    end
+
+    if not body.valid then
+        if body.reason then
+            local reason = string.lower(tostring(body.reason))
+            if string.find(reason, 'nonce') then
+                showStatus('Invalid or expired nonce', KEYCOLOR.ERROR, 3, false,
+                    "Help: Security handshake failed. Disable VPN and try again.")
+            elseif string.find(reason, 'hwid blacklist') then
+                showStatus('Your HWID Is Blocked (contact us)', KEYCOLOR.ERROR, 3, false,
+                    "Help: Contact support in Discord for assistance.")
+            elseif string.find(reason, 'hwid') or string.find(reason, 'hardware') then
+                showStatus('Key bound to another HWID', KEYCOLOR.ERROR, 3, false,
+                    "Help: This key is already used on different device. Get a new key.")
+            else
+                showStatus('Key validation failed: ' .. tostring(body.reason), KEYCOLOR.ERROR, 3, false,
+                    "Help: Check if key is correct and not expired. Get a new key if needed.")
+            end
+        else
+            showStatus('Key is invalid or expired', KEYCOLOR.ERROR, 3, false,
+                "Help: Key might be expired or incorrect. Get a new key from our website.")
+        end
+        return nil
+    end
+
+    if type(body.unlock) ~= 'string' or #body.unlock ~= 64 then
+        showStatus('Authorization rejected (ERR-AU01)', KEYCOLOR.ERROR, 4, false,
+            "Help: Your executor environment is modified or the response was tampered with. Close other scripts and retry.")
+        return nil
+    end
+
+    return { unlock = body.unlock, nonce = nonce, key = key }
+end
+
+local dbgLines = {}
+local function dbg(msg)
+    local line = '[NEOX] ' .. tostring(msg)
+    dbgLines[#dbgLines + 1] = line
+    pcall(function() warn(line) end)
+    pcall(function() print(line) end)
+    pcall(function()
+        if writefile then
+            writefile('neox_debug.txt', tblConcat(dbgLines, '\n'))
+        end
+    end)
+    pcall(function()
+        statusLabel.Text = tostring(msg)
+    end)
+end
+
+local function decryptAndRun(auth)
+    dbg('STAGE 1: starting unlock')
+    local unlockBytes = hexToBytes(auth.unlock)
+    if not unlockBytes or #unlockBytes ~= 32 then
+        dbg('STAGE 1 FAILED: unlock bytes = ' .. tostring(unlockBytes and #unlockBytes or 'nil'))
+        return false, 'Authorization rejected (ERR-AU02)'
+    end
+    dbg('STAGE 1 OK: unlock is 32 bytes')
+
+    dbg('STAGE 2: building key')
+    local mask = sha256Bytes(auth.nonce .. '|' .. hwid .. '|' .. auth.key)
+    local scriptKey = xorStrings(unlockBytes, mask)
+    if #scriptKey ~= 32 then
+        dbg('STAGE 2 FAILED: key length ' .. tostring(#scriptKey))
+        return false, 'Authorization rejected (ERR-AU03)'
+    end
+    dbg('STAGE 2 OK: key built')
+
+    showStatus('Downloading script...', KEYCOLOR.INFO, nil, true)
+    dbg('STAGE 3: downloading ' .. tostring(gameURL))
+    local blob = httpGet(gameURL)
+    if not blob or #blob < 32 then
+        dbg('STAGE 3 FAILED: got ' .. tostring(blob and #blob or 'nil') .. ' bytes')
+        return false, 'Failed to download script (ERR-PL01)'
+    end
+    dbg('STAGE 3 OK: downloaded ' .. #blob .. ' bytes')
+
+    showStatus('Decrypting script...', KEYCOLOR.INFO, nil, true)
+
+    local marker = 'NX7F2A'
+    local dataStart = string.find(blob, marker, 1, true)
+    if dataStart then
+        local dataEnd = string.find(blob, marker, dataStart + #marker, true)
+        if dataEnd then
+            blob = strSub(blob, dataStart + #marker, dataEnd - 1)
+            dbg('STAGE 4 OK: marker found, data is ' .. #blob .. ' bytes')
+        else
+            dbg('STAGE 4 WARNING: opening marker found but no closing marker')
+        end
+    else
+        dbg('STAGE 4 WARNING: no marker found, using whole file')
+    end
+
+    dbg('STAGE 5: base64 decoding')
+    local raw = base64Decode(blob)
+    if not raw or #raw < 24 then
+        dbg('STAGE 5 FAILED: decoded ' .. tostring(raw and #raw or 'nil') .. ' bytes')
+        return false, 'Corrupt script data (ERR-PL02)'
+    end
+    dbg('STAGE 5 OK: decoded to ' .. #raw .. ' bytes')
+
+    dbg('STAGE 6: decrypting (this can take a few seconds)')
+    local plain = rc4(raw, scriptKey, 768)
+    dbg('STAGE 6 OK: decrypted ' .. #plain .. ' bytes, header = "' .. strSub(plain, 1, 7) .. '"')
+
+    if strSub(plain, 1, 7) ~= 'NEOXP1|' or strSub(plain, 16, 16) ~= '|' then
+        dbg('STAGE 7 FAILED: wrong header - file not encrypted, or wrong secret')
+        return false, 'Authorization rejected (ERR-AU04)'
+    end
+    dbg('STAGE 7 OK: header valid')
+
+    local checksum = strSub(plain, 8, 15)
+    dbg('STAGE 7b: checksum field read = ' .. tostring(checksum))
+    local source = strSub(plain, 17)
+    dbg('STAGE 7c: source extracted, ' .. tostring(#source) .. ' bytes')
+    dbg('STAGE 7d: source starts with: ' .. strSub(source, 1, 60))
+
+    if #source < 16 then
+        dbg('STAGE 8 FAILED: source only ' .. #source .. ' bytes')
+        return false, 'Script data incomplete (ERR-PL03)'
+    end
+
+    dbg('STAGE 8: verifying checksum')
+    local actual = fnv1aHex(source)
+    dbg('STAGE 8b: computed ' .. tostring(actual) .. ' expected ' .. tostring(checksum))
+    if actual ~= checksum then
+        dbg('STAGE 8 FAILED: checksum mismatch')
+        return false, 'Script integrity check failed (ERR-IN01)'
+    end
+    dbg('STAGE 8 OK: checksum matches')
+
+    showStatus('Loading ' .. gameName .. '...', KEYCOLOR.SUCCESS, nil, true)
+    dbg('STAGE 9: compiling')
+    local compiledOk, chunk = pcall(compile, source)
+    dbg('STAGE 9b: compile returned ok=' .. tostring(compiledOk) .. ' type=' .. type(chunk))
+    if not compiledOk then
+        dbg('STAGE 9 FAILED: compile crashed: ' .. tostring(chunk))
+        return false, 'Compile crashed: ' .. tostring(chunk)
+    end
+    if type(chunk) ~= 'function' then
+        dbg('STAGE 9 FAILED: syntax error: ' .. tostring(chunk))
+        return false, 'Syntax error: ' .. tostring(chunk)
+    end
+
+    dbg('STAGE 10: running your script now')
+    local ranOk, ret = pcall(chunk)
+    if not ranOk then
+        dbg('STAGE 10 FAILED: ' .. tostring(ret))
+        return false, 'Script error: ' .. tostring(ret)
+    end
+    dbg('STAGE 10 OK: chunk returned type=' .. type(ret))
+
+    local depth = 0
+    while type(ret) == 'function' and depth < 5 do
+        depth = depth + 1
+        dbg('STAGE 11: chunk returned a function, calling it (depth ' .. depth .. ')')
+        local innerOk, innerRet = pcall(ret)
+        if not innerOk then
+            dbg('STAGE 11 FAILED: ' .. tostring(innerRet))
+            return false, 'Script error: ' .. tostring(innerRet)
+        end
+        ret = innerRet
+        dbg('STAGE 11 OK: returned type=' .. type(ret))
+    end
+
+    dbg('STAGE 12 OK: script finished')
+    return true, nil
+end
+
+local function runGameScript(auth)
+    local ok, result, err = pcall(decryptAndRun, auth)
+    if not ok then
+        dbg('CRASH: ' .. tostring(result))
+        return false, 'Loader error: ' .. tostring(result)
+    end
+    return result, err
+end
+
+local function handleVerification()
+    if isProcessing then return end
+
+    local key = keyInput.Text
+    isProcessing = true
+    setInputVisible(false)
+
+    showStatus('Starting key verification process...', KEYCOLOR.INFO, nil, true)
+    task.wait(1)
+
+    local auth = validateKey(key)
+    if auth then
+        showStatus('Key verification successful', KEYCOLOR.SUCCESS, 1)
+        task.wait(1)
+
+        if writefile and saveKey(key) then
+            showStatus('Key saved for future use', KEYCOLOR.SUCCESS, 1)
+            task.wait(1)
+        end
+
+        local ok, err = runGameScript(auth)
+        if ok then
+            cleanup()
+            return
+        end
+
+        showStatus(err or 'Failed to load script', KEYCOLOR.ERROR, 5, false,
+            "Help: If this keeps happening, rejoin without any other scripts running and try again.")
+        sendNotification(CONFIG.HUB_NAME .. " - ERROR", err or 'Failed to load script', CONFIG.NOTIFICATION_DURATION.ERROR)
+        isProcessing = false
+        task.wait(5)
+        setInputVisible(true)
+    else
+        isProcessing = false
+        task.wait(3)
+        setInputVisible(true)
+    end
+end
+
+closeButton.MouseButton1Click:Connect(function()
+    cleanup()
+end)
+
+getKeyButton.MouseButton1Click:Connect(function()
+    if isProcessing then return end
+    setInputVisible(false)
+    if setclipboard then
+        setclipboard('https://neoxsoftworks.eu/key.html')
+        showStatus('Key link copied to clipboard', KEYCOLOR.PRIMARY, 2)
+    else
+        showStatus('Clipboard not supported on this executor', KEYCOLOR.WARNING, 3)
+    end
+    task.wait(2)
+    setInputVisible(true)
+end)
+
+discordButton.MouseButton1Click:Connect(function()
+    if isProcessing then return end
+    setInputVisible(false)
+    if setclipboard then
+        setclipboard('https://neoxsoftworks.eu/discord')
+        showStatus('Discord invite copied to clipboard', KEYCOLOR.DISCORD, 2)
+    else
+        showStatus('Clipboard not supported on this executor', KEYCOLOR.WARNING, 3)
+    end
+    task.wait(2)
+    setInputVisible(true)
+end)
+
+buyButton.MouseButton1Click:Connect(function()
+    if isProcessing then return end
+    setInputVisible(false)
+    if setclipboard then
+        setclipboard('https://neoxsoftworks.eu/getneox.html')
+        showStatus('Premium link copied to clipboard', KEYCOLOR.PREMIUM, 3)
+    else
+        showStatus('Clipboard not supported on this executor', KEYCOLOR.WARNING, 3)
+    end
+    task.wait(3)
+    setInputVisible(true)
+end)
+
+verifyButton.MouseButton1Click:Connect(function()
+    handleVerification()
+end)
+
+keyInput.FocusLost:Connect(function(enterPressed)
+    if enterPressed and not isProcessing then
+        handleVerification()
+    end
+end)
+
+if UserInputService then
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if input.KeyCode == Enum.KeyCode.Return or input.KeyCode == Enum.KeyCode.KeypadEnter then
+            if keyGui and keyGui.Parent and not isProcessing then
+                handleVerification()
+            end
+        end
+    end)
+end
+
+if envTampered and CONFIG.STRICT_ENVIRONMENT then
+    setInputVisible(false)
+    isProcessing = true
+    showStatus('Modified executor environment detected', KEYCOLOR.ERROR, nil, false,
+        "Help: Close any bypass, injector or wrapper scripts, rejoin the game, and run NEOX HUB on its own.")
+    return
+end
+
+if envTampered then
+    showStatus('Warning: modified environment detected', KEYCOLOR.WARNING, 5, false,
+        "Help: Close other scripts if verification fails.")
+end
+
+local savedKey = loadSavedKey()
+if savedKey and savedKey ~= '' then
+    setInputVisible(false)
+    isProcessing = true
+
+    task.spawn(function()
+        showStatus('Auto-verifying saved key...', KEYCOLOR.INFO, nil, true)
+        task.wait(0.5)
+
+        local auth = validateKey(savedKey)
+        if auth then
+            local ok, err = runGameScript(auth)
+            if ok then
+                cleanup()
+                return
+            end
+            showStatus(err or 'Failed to load script', KEYCOLOR.ERROR, 5, false,
+                "Help: If this keeps happening, rejoin without any other scripts running and try again.")
+            task.wait(5)
+            isProcessing = false
+            setInputVisible(true)
+        else
+            showStatus('Saved key expired. Enter new key.', KEYCOLOR.WARNING, 2, false,
+                "Help: Your saved key is no longer valid. Get a new key from our website.")
+            tutorialText.Text = 'Saved key expired. Please enter a new key. Press Enter or click Verify to authenticate.'
+            tutorialText.TextColor3 = KEYCOLOR.WARNING
+            keyInput.Text = ''
+            task.wait(2)
+            isProcessing = false
+            setInputVisible(true)
+        end
+    end)
+end
